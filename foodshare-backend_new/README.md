@@ -197,7 +197,7 @@ Authorization: Bearer eyJhbGci...
       "activityLabel": "3 donations"
     }
   ],
-  "allDonations": [ ... ]
+  "allDonations": []
 }
 ```
 
