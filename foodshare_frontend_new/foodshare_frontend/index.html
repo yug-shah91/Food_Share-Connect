@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FoodShare Connect</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+</head>
+<body>
+
+<!-- ===================== LOGIN SCREEN ===================== -->
+<div id="screen-login" class="screen active">
+  <div class="login-wrap">
+    <div class="login-brand">
+      <div class="logo-icon">🌱</div>
+      <span class="logo-text">FoodShare<span>Connect</span></span>
+    </div>
+    <div class="login-card" id="login-form-container">
+      <h2>Welcome back</h2>
+      <p class="login-hint">Sign in to continue</p>
+
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="login-user" placeholder="e.g. yash, yug, yatharth" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="login-pass" placeholder="Enter password"/>
+      </div>
+      <div id="login-error" class="login-error" style="display:none">❌ Invalid username or password</div>
+      <button class="btn btn-primary full" onclick="doLogin()">Sign In</button>
+      <p style="text-align:center; margin-top:10px; font-size:14px;">Don't have an account? <a href="#" onclick="toggleSignup(true)">Sign up</a></p>
+
+      <div class="demo-accounts">
+        <div class="demo-title">Demo accounts</div>
+        <div class="demo-row" onclick="fillLogin('yash','yash123')">
+          <span class="role-pill donor">Donor</span>
+          <span>yash / yash123</span>
+        </div>
+        <div class="demo-row" onclick="fillLogin('yug','yug123')">
+          <span class="role-pill recipient">Recipient</span>
+          <span>yug / yug123</span>
+        </div>
+        <div class="demo-row" onclick="fillLogin('yatharth','yatharth123')">
+          <span class="role-pill admin">Admin</span>
+          <span>yatharth / yatharth123</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIGNUP FORM -->
+    <div class="login-card" id="signup-form-container" style="display:none">
+      <h2>Create an Account</h2>
+      <p class="login-hint">Join FoodShare Connect</p>
+
+      <div class="form-group">
+        <label>Full Name</label>
+        <input type="text" id="reg-name" placeholder="Enter your full name" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="reg-user" placeholder="Choose a username" autocomplete="off"/>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="reg-pass" placeholder="Create a password"/>
+      </div>
+      <div class="form-group">
+        <label>Role</label>
+        <select id="reg-role" onchange="updateSecurityLabel()">
+          <option value="DONOR">Donor</option>
+          <option value="RECIPIENT">Recipient</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label id="security-id-label">Restaurant ID</label>
+        <input type="text" id="reg-security-id" placeholder="Enter ID for verification"/>
+      </div>
+      <div id="reg-error" class="login-error" style="display:none">❌ Error</div>
+      <button class="btn btn-primary full" onclick="doRegister()">Sign Up</button>
+      <p style="text-align:center; margin-top:10px; font-size:14px;">Already have an account? <a href="#" onclick="toggleSignup(false)">Sign in</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== APP SHELL ===================== -->
+<div id="screen-app" class="screen" style="display:none">
+
+  <!-- NAVBAR -->
+  <nav class="navbar">
+    <div class="nav-brand" onclick="goHome()">
+      <div class="logo-icon">🌱</div>
+      <span class="logo-text">FoodShare<span>Connect</span></span>
+    </div>
+    <div class="nav-links" id="nav-links"><!-- filled by JS --></div>
+    <div class="nav-user">
+      <div class="nav-notif" id="nav-notif-btn" onclick="toggleNotifications()">
+        🔔 <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+      </div>
+      <div class="nav-notif-dropdown" id="notif-dropdown" style="display:none">
+        <div class="notif-dropdown-header">Notifications</div>
+        <div id="notif-list" class="notif-list">
+          <div class="empty-mini">No notifications</div>
+        </div>
+      </div>
+      <div class="nav-user-info">
+        <span id="nav-username"></span>
+        <span id="nav-role-pill"></span>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">Logout</button>
+    </div>
+  </nav>
+
+  <!-- ===== DONOR PAGES ===== -->
+  <div id="page-donor-home" class="page">
+    <section class="hero">
+      <div class="hero-left">
+        <div class="hero-tag">👋 Welcome back, <span id="donor-name-hero"></span></div>
+        <h1>Share your <em>surplus food</em> today</h1>
+        <p class="hero-sub">Your donations help NGOs and food banks feed hundreds of people nearby. Every listing makes a difference.</p>
+        <div class="hero-btns">
+          <button class="btn btn-primary" onclick="showPage('donor-donate')">🍽 Add New Donation</button>
+          <button class="btn btn-ghost" onclick="showPage('donor-history')">📋 My Donations</button>
+        </div>
+        <div class="hero-stats">
+          <div><div class="stat-val" id="d-meals">0</div><div class="stat-lbl">Meals Donated</div></div>
+          <div><div class="stat-val" id="d-active">0</div><div class="stat-lbl">Active Listings</div></div>
+          <div><div class="stat-val" id="d-completed">0</div><div class="stat-lbl">Completed</div></div>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="hero-card">
+          <div class="notif-toast" id="donor-notif">🔔 Your listing was matched!</div>
+          <div class="map-mock">
+            <div class="map-grid"></div>
+            <div class="map-pin green"></div>
+            <div class="map-pin orange"></div>
+            <div class="map-pin green p2"></div>
+            <div class="map-pin green p3"></div>
+          </div>
+          <div class="hero-card-label">Your recent listings</div>
+          <div id="donor-recent-listings"><div class="empty-mini">No listings yet. Add your first donation!</div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="page-donor-donate" class="page">
+    <div class="page-header">
+      <h2>Add Donation Listing</h2>
+      <p>Fill in the details — AI will predict freshness and notify nearby recipients automatically.</p>
+    </div>
+    <div class="donate-layout">
+      <div class="form-card">
+        <div class="form-section">
+          <div class="form-section-title">Food Details</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Food Name *</label>
+              <input type="text" id="foodName" placeholder="e.g. Dal Makhani, Veg Biryani"/>
+            </div>
+            <div class="form-group">
+              <label>Category *</label>
+              <select id="foodCategory">
+                <option value="">Select category</option>
+                <option>Cooked Meals</option>
+                <option>Bakery Items</option>
+                <option>Vegetables &amp; Fruits</option>
+                <option>Dairy Products</option>
+                <option>Packaged Food</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Quantity (servings) *</label>
+              <input type="number" id="quantity" placeholder="e.g. 20" min="1"/>
+            </div>
+            <div class="form-group">
+              <label>Storage Condition *</label>
+              <select id="storage">
+                <option value="">Select condition</option>
+                <option>Room Temperature</option>
+                <option>Refrigerated</option>
+                <option>Frozen</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Prepared At</label>
+              <input type="time" id="prepTime"/>
+            </div>
+            <div class="form-group">
+              <label>Pickup Available Until</label>
+              <input type="time" id="pickupUntil"/>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Freshness Duration</label>
+              <input type="text" id="freshnessDuration" placeholder="e.g. 2 hours, 1 day"/>
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Pickup Location</div>
+          <div class="form-group">
+            <label>Address *</label>
+            <input type="text" id="address" placeholder="e.g. Vijay Nagar, Indore"/>
+          </div>
+          <div class="hint-row">📍 Used to calculate distance and match nearest recipients.</div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Additional Notes</div>
+          <div class="form-group">
+            <textarea id="notes" rows="3" placeholder="Allergens, packaging details, or any special instructions..."></textarea>
+          </div>
+        </div>
+        <button class="btn btn-primary full" onclick="submitDonation()">Submit Donation Listing</button>
+      </div>
+
+      <!-- AI PANEL -->
+      <div class="ai-panel">
+        <div class="ai-header"><span class="ai-dot"></span> AI Prediction Engine</div>
+        <div id="ai-empty" class="ai-empty">
+          <div class="ai-empty-icon">🤖</div>
+          <p>Fill the form and submit to see freshness prediction and recipient matching.</p>
+        </div>
+        <div id="ai-result" style="display:none">
+          <div class="score-ring">
+            <div class="score-num" id="f-score">—</div>
+            <div class="score-lbl">Freshness Score / 100</div>
+          </div>
+          <div class="detail-list">
+            <div class="detail-row"><span>Risk Level</span><span class="fbadge" id="f-risk">—</span></div>
+            <div class="detail-row"><span>Safe Window</span><span id="f-hours">—</span></div>
+            <div class="detail-row"><span>Recommendation</span><span id="f-rec">—</span></div>
+          </div>
+          <div class="divider"></div>
+          <div id="matching-loader" class="matching-loader"><span class="spinner"></span> Finding nearest recipients...</div>
+          <div id="matching-results" style="display:none">
+            <div class="match-title">📍 Top Recipients Notified</div>
+            <div class="recipient-item"><div class="r-icon">🏥</div><div class="r-info"><div class="r-name">Annapurna Food Bank</div><div class="r-meta">1.2 km · Score: 94</div></div><span class="fbadge low">Notified</span></div>
+            <div class="recipient-item"><div class="r-icon">🤝</div><div class="r-info"><div class="r-name">Roti Bank Indore</div><div class="r-meta">2.1 km · Score: 81</div></div><span class="fbadge low">Notified</span></div>
+            <div class="recipient-item"><div class="r-icon">🏫</div><div class="r-info"><div class="r-name">Jan Seva NGO</div><div class="r-meta">3.4 km · Score: 73</div></div><span class="fbadge low">Notified</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-donor-history" class="page">
+    <div class="page-header">
+      <h2>My Donation History</h2>
+      <p>All listings you have created and their current status.</p>
+    </div>
+    <div class="table-wrap">
+      <div id="donor-history-content"><!-- filled by JS --></div>
+    </div>
+  </div>
+
+  <!-- ===== RECIPIENT PAGES ===== -->
+  <div id="page-recipient-home" class="page">
+    <section class="hero">
+      <div class="hero-left">
+        <div class="hero-tag">👋 Welcome back, <span id="recipient-name-hero"></span></div>
+        <h1>Find <em>available food</em> near you</h1>
+        <p class="hero-sub">Browse active donation listings from restaurants, hotels, and households nearby. Claim a pickup and make an impact.</p>
+        <div class="hero-btns">
+          <button class="btn btn-primary" onclick="showPage('recipient-find')">📍 Browse Listings</button>
+          <button class="btn btn-ghost" onclick="showPage('recipient-claimed')">✅ My Claimed Pickups</button>
+        </div>
+        <div class="hero-stats">
+          <div><div class="stat-val" id="r-available">0</div><div class="stat-lbl">Available Now</div></div>
+          <div><div class="stat-val" id="r-claimed">0</div><div class="stat-lbl">My Claims</div></div>
+          <div><div class="stat-val" id="r-meals">0</div><div class="stat-lbl">Meals Collected</div></div>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="hero-card">
+          <div class="notif-toast" id="recip-notif">🔔 3 new listings near you!</div>
+          <div class="map-mock">
+            <div id="real-map" style="height:100%; width:100%; border-radius:12px;"></div>
+          </div>
+          <div class="hero-card-label">Latest available listings</div>
+          <div id="recip-preview-listings"><div class="empty-mini">No active listings right now.</div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="page-recipient-find" class="page">
+    <div class="page-header">
+      <h2>Available Food Listings</h2>
+      <p>Browse surplus food available near you right now.</p>
+    </div>
+    <div class="filters-bar">
+      <input type="text" class="search-box" placeholder="🔍  Search by food name..." oninput="filterListings(this.value)"/>
+      <select class="filter-sel" onchange="filterByCategory(this.value)">
+        <option value="">All Categories</option>
+        <option>Cooked Meals</option>
+        <option>Bakery Items</option>
+        <option>Vegetables &amp; Fruits</option>
+        <option>Dairy Products</option>
+        <option>Packaged Food</option>
+      </select>
+      <select class="filter-sel" onchange="filterByFreshness(this.value)">
+        <option value="">All Freshness</option>
+        <option value="low">Fresh (Low Risk)</option>
+        <option value="med">Use Soon (Medium)</option>
+      </select>
+    </div>
+    <div class="listings-grid" id="listings-grid"><!-- filled by JS --></div>
+  </div>
+
+  <div id="page-recipient-claimed" class="page">
+    <div class="page-header">
+      <h2>My Claimed Pickups</h2>
+      <p>Donations you have claimed and their pickup status.</p>
+    </div>
+    <div class="table-wrap">
+      <div id="claimed-content"><!-- filled by JS --></div>
+    </div>
+  </div>
+
+  <!-- ===== ADMIN PAGES ===== -->
+  <div id="page-admin-home" class="page">
+    <div class="page-header">
+      <h2>Admin Dashboard</h2>
+      <p>Platform-wide overview — all users, donations, and impact metrics.</p>
+    </div>
+    <div class="dash-body">
+      <div class="impact-row">
+        <div class="impact-card" style="background:linear-gradient(135deg,#e8f5ee,#d0ead9)">
+          <div class="imp-icon">🍽</div><div class="imp-num" id="a-meals">0</div><div class="imp-lbl">Total Meals</div>
+        </div>
+        <div class="impact-card" style="background:linear-gradient(135deg,#e0f4ef,#c5eae0)">
+          <div class="imp-icon">🌿</div><div class="imp-num" id="a-co2">0 kg</div><div class="imp-lbl">CO₂ Saved</div>
+        </div>
+        <div class="impact-card" style="background:linear-gradient(135deg,#fff4ec,#fde8c5)">
+          <div class="imp-icon">📋</div><div class="imp-num" id="a-listings">0</div><div class="imp-lbl">Total Listings</div>
+        </div>
+        <div class="impact-card" style="background:linear-gradient(135deg,#eeebff,#ddd8fa)">
+          <div class="imp-icon">✅</div><div class="imp-num" id="a-completed">0</div><div class="imp-lbl">Completed</div>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="dash-card">
+          <div class="dash-card-title">All Donation Listings</div>
+          <div id="admin-all-listings"><!-- filled by JS --></div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-title">Registered Users</div>
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>Role</th><th>Activity</th></tr></thead>
+            <tbody id="admin-users-table"><!-- filled by JS --></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="dash-card" style="margin-top:20px">
+        <div class="dash-card-title">Freshness Prediction Log</div>
+        <div id="admin-pred-log" class="pred-log"><!-- filled by JS --></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end screen-app -->
+
+<!-- TOAST -->
+<div id="toast" class="toast"></div>
+
+<!-- CLAIM MODAL -->
+<div id="claim-modal" class="modal-overlay" style="display:none" onclick="closeModal(event)">
+  <div class="modal-card">
+    <h3 id="modal-title">Confirm Pickup</h3>
+    <p id="modal-desc" style="color:var(--muted);font-size:14px;margin:8px 0 20px"></p>
+    <div class="modal-detail" id="modal-details"><!-- filled by JS --></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="document.getElementById('claim-modal').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm-btn">Confirm Pickup</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
