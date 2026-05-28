@@ -155,7 +155,7 @@ public class DonationService {
                 .riskLabel(risk != null ? freshnessService.riskLabel(risk) : null)
                 .riskHours(risk != null ? freshnessService.safeWindow(risk) : null)
                 .riskRecommendation(risk != null ? freshnessService.recommendation(risk) : null)
-                .status(d.getStatus().name().toLowerCase())
+                .status(d.getStatus().name())
                 .donorUsername(d.getDonor().getUsername())
                 .donorFullName(d.getDonor().getFullName())
                 .donorPhoneNumber(d.getDonor().getPhoneNumber())

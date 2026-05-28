@@ -53,6 +53,7 @@ public class AuthService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(request.getRole())
                 .securityId(request.getSecurityId())
+                .phoneNumber(request.getPhoneNumber() != null ? request.getPhoneNumber().trim() : null)
                 .build();
 
         userRepository.save(user);

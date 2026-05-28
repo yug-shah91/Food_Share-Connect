@@ -151,6 +151,14 @@ function doLogout() {
   document.getElementById('login-user').value    = '';
   document.getElementById('login-pass').value    = '';
   document.getElementById('login-error').style.display = 'none';
+  
+  // Clear registration fields as well
+  document.getElementById('reg-name').value = '';
+  document.getElementById('reg-user').value = '';
+  document.getElementById('reg-pass').value = '';
+  document.getElementById('reg-phone').value = '';
+  document.getElementById('reg-security-id').value = '';
+  document.getElementById('reg-error').style.display = 'none';
 }
 
 function toggleSignup(showSignup) {
@@ -178,6 +186,7 @@ async function doRegister() {
   const fullName = document.getElementById('reg-name').value.trim();
   const username = document.getElementById('reg-user').value.trim().toLowerCase();
   const password = document.getElementById('reg-pass').value.trim();
+  const phoneNumber = document.getElementById('reg-phone').value.trim();
   const role = document.getElementById('reg-role').value;
   const securityId = document.getElementById('reg-security-id').value.trim();
   const errEl = document.getElementById('reg-error');
@@ -191,7 +200,7 @@ async function doRegister() {
   }
 
   try {
-    const data = await api.register({ fullName, username, password, role, securityId });
+    const data = await api.register({ fullName, username, password, role, securityId, phoneNumber });
     setToken(data.token);
     currentUser = {
       username: data.username,
@@ -274,10 +283,23 @@ function showPage(id) {
  
   if (id === 'donor-home')        renderDonorHome();
   if (id === 'donor-history')     renderDonorHistory();
+  if (id === 'donor-donate') {
+    resetAiPanel();
+    if (donateMapInstance) {
+      setTimeout(() => {
+        donateMapInstance.invalidateSize();
+      }, 100);
+    }
+  }
   if (id === 'recipient-home')    renderRecipientHome();
   if (id === 'recipient-find')    renderFindFood();
   if (id === 'recipient-claimed') renderClaimedPickups();
   if (id === 'admin-home')        renderAdminDashboard();
+}
+
+function resetAiPanel() {
+  document.getElementById('ai-empty').style.display  = 'block';
+  document.getElementById('ai-result').style.display = 'none';
 }
  
 // ============================================================
@@ -318,6 +340,14 @@ async function renderDonorHome() {
           <span class="fbadge ${d.status === 'CLAIMED' ? 'grey' : meta.cls}">${d.status === 'CLAIMED' ? 'Claimed' : 'Active'}</span>
         </div>`;
     }).join('');
+
+    // Update donor map markers!
+    if (donorMapInstance) {
+      setTimeout(() => {
+        donorMapInstance.invalidateSize();
+        updateDonorMapMarkers(donations);
+      }, 100);
+    }
   } catch (err) {
     showToast('⚠️ Could not load donations: ' + err.message);
   }
@@ -346,18 +376,20 @@ async function submitDonation() {
   const category = CATEGORY_TO_ENUM[categoryRaw] || categoryRaw;
   const storage  = STORAGE_TO_ENUM[storageRaw]   || storageRaw;
 
-  // Geocode address via Nominatim
-  let latitude = null;
-  let longitude = null;
-  try {
-    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`);
-    const geoData = await geoRes.json();
-    if (geoData && geoData.length > 0) {
-      latitude = parseFloat(geoData[0].lat);
-      longitude = parseFloat(geoData[0].lon);
+  // Geocode address via Nominatim if not already set by clicking map
+  let latitude = selectedLatitude;
+  let longitude = selectedLongitude;
+  if (!latitude || !longitude) {
+    try {
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`);
+      const geoData = await geoRes.json();
+      if (geoData && geoData.length > 0) {
+        latitude = parseFloat(geoData[0].lat);
+        longitude = parseFloat(geoData[0].lon);
+      }
+    } catch (geoErr) {
+      console.warn("Geocoding failed, continuing without coordinates", geoErr);
     }
-  } catch (geoErr) {
-    console.warn("Geocoding failed, continuing without coordinates", geoErr);
   }
 
   try {
@@ -389,10 +421,21 @@ async function submitDonation() {
       showToast('✅ "' + foodName + '" listed! Recipients have been notified.');
  
       // Reset form
-      ['foodName', 'quantity', 'address', 'notes', 'prepTime', 'pickupUntil', 'freshnessDuration']
-        .forEach(id => document.getElementById(id).value = '');
+      ['foodName', 'quantity', 'address', 'notes', 'prepTime', 'pickupUntil', 'freshnessDuration', 'magicInput']
+        .forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
       document.getElementById('foodCategory').value = '';
       document.getElementById('storage').value      = '';
+
+      // Reset map marker and coordinate variables
+      selectedLatitude = null;
+      selectedLongitude = null;
+      if (donateMarker && donateMapInstance) {
+        donateMapInstance.removeLayer(donateMarker);
+        donateMarker = null;
+      }
     }, 2000);
  
   } catch (err) {
@@ -451,6 +494,7 @@ async function renderRecipientHome() {
       api.getActive(),
       api.getMyClaims(),
     ]);
+    _activeListings = activeDonations; // Store globally so claiming from map works immediately
  
     const available = activeDonations.length;
     const claimed   = myClaims.length;
@@ -613,8 +657,13 @@ async function confirmClaim(donationId) {
     const d = _activeListings.find(x => x.id === donationId);
     showToast('✅ "' + (d ? d.foodName : 'Item') + '" claimed! Pickup confirmed.');
  
-    // Refresh the listings page (now one fewer active item)
-    renderFindFood();
+    // Refresh the currently active page to update UI state
+    const activePage = document.querySelector('.page.active');
+    if (activePage && activePage.id === 'page-recipient-home') {
+      renderRecipientHome();
+    } else {
+      renderFindFood();
+    }
   } catch (err) {
     document.getElementById('claim-modal').style.display = 'none';
     showToast('❌ Claim failed: ' + err.message);
@@ -736,25 +785,87 @@ async function renderAdminDashboard() {
 }
  
 // ============================================================
-//  TOAST
+//  MAP INITIALIZATION & HELPERS
 // ============================================================
-function showToast(msg) {
-  const t     = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 3500);
-}
-
 let mapInstance = null;
 let mapMarkers = [];
-
+let donorMapInstance = null;
+let donorMapMarkers = [];
+let donateMapInstance = null;
+let donateMarker = null;
+let selectedLatitude = null;
+let selectedLongitude = null;
+ 
 function initMap() {
-  if (mapInstance) return;
-  mapInstance = L.map('real-map').setView([23.2599, 77.4126], 12); // Bhopal
+  // 1. Recipient Map
+  if (!mapInstance && document.getElementById('real-map')) {
+    mapInstance = L.map('real-map').setView([23.2599, 77.4126], 12); // Bhopal
+ 
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(mapInstance);
+ 
+    // If active listings are already loaded, display their markers immediately
+    if (_activeListings && _activeListings.length > 0) {
+      updateMapMarkers(_activeListings);
+    }
+  }
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(mapInstance);
+  // 2. Donor Home Map
+  if (!donorMapInstance && document.getElementById('donor-map')) {
+    donorMapInstance = L.map('donor-map').setView([23.2599, 77.4126], 12); // Bhopal
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(donorMapInstance);
+  }
+
+  // 3. Donate Page Map (Interactive Location Picker)
+  if (!donateMapInstance && document.getElementById('donate-map')) {
+    donateMapInstance = L.map('donate-map').setView([23.2599, 77.4126], 12); // Bhopal
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(donateMapInstance);
+
+    // Let donor click to select coordinates & reverse-geocode address
+    donateMapInstance.on('click', async (e) => {
+      const { lat, lng } = e.latlng;
+      setDonateMarker(lat, lng);
+      
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
+        const data = await res.json();
+        if (data && data.display_name) {
+          document.getElementById('address').value = data.display_name;
+        }
+      } catch (err) {
+        console.warn("Reverse geocoding failed", err);
+      }
+    });
+
+    // Listen for manual address typing to geocode and center pin on map
+    const addressInput = document.getElementById('address');
+    if (addressInput) {
+      addressInput.addEventListener('change', async (e) => {
+        const addr = e.target.value.trim();
+        if (addr) {
+          try {
+            const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1`);
+            const geoData = await geoRes.json();
+            if (geoData && geoData.length > 0) {
+              const lat = parseFloat(geoData[0].lat);
+              const lon = parseFloat(geoData[0].lon);
+              setDonateMarker(lat, lon);
+              donateMapInstance.setView([lat, lon], 14);
+            }
+          } catch (err) {
+            console.warn("Geocoding typed address failed", err);
+          }
+        }
+      });
+    }
+  }
 }
 
 function updateMapMarkers(listings) {
@@ -849,4 +960,169 @@ async function deleteDonationAdmin(id) {
   } catch (err) {
     showToast("❌ Could not delete: " + err.message);
   }
+}
+
+// ============================================================
+//  DONOR MAP & LOCATION PICKER HELPERS
+// ============================================================
+function updateDonorMapMarkers(donations) {
+  if (!donorMapInstance) return;
+
+  // Clear old markers
+  donorMapMarkers.forEach(m => donorMapInstance.removeLayer(m));
+  donorMapMarkers = [];
+
+  let bounds = L.latLngBounds();
+  let hasValidCoords = false;
+
+  donations.forEach(d => {
+    if (d.latitude && d.longitude) {
+      hasValidCoords = true;
+      const marker = L.marker([d.latitude, d.longitude]).addTo(donorMapInstance);
+      const risk = (d.riskLevel || 'LOW').toUpperCase();
+      const meta = RISK_META[risk] || RISK_META.LOW;
+      
+      marker.bindPopup(`
+        <strong>${EMOJI_MAP[d.category] || '🍱'} ${d.foodName}</strong><br>
+        Qty: ${d.quantity} servings<br>
+        Status: <span style="font-weight:bold;color:${d.status === 'CLAIMED' ? 'var(--muted)' : 'var(--primary)'}">${d.status === 'CLAIMED' ? 'Claimed' : 'Active'}</span><br>
+        Score: ${d.freshnessScore}/100 (${d.riskLabel || meta.label})
+      `);
+      donorMapMarkers.push(marker);
+      bounds.extend([d.latitude, d.longitude]);
+    }
+  });
+
+  if (hasValidCoords) {
+    donorMapInstance.fitBounds(bounds, { padding: [20, 20], maxZoom: 14 });
+  } else {
+    donorMapInstance.setView([23.2599, 77.4126], 12);
+  }
+}
+
+function setDonateMarker(lat, lon) {
+  selectedLatitude = lat;
+  selectedLongitude = lon;
+  
+  if (donateMarker) {
+    donateMarker.setLatLng([lat, lon]);
+  } else {
+    donateMarker = L.marker([lat, lon]).addTo(donateMapInstance);
+  }
+}
+
+// ============================================================
+//  MAGIC PREDICT (AI FORM AUTO-FILLER)
+// ============================================================
+function magicAutofill() {
+  const text = document.getElementById('magicInput').value.trim();
+  if (!text) {
+    showToast('⚠️ Please enter a description first.');
+    return;
+  }
+
+  // 1. Quantity extraction (find any number)
+  const qtyMatch = text.match(/\b(\d+)\b/);
+  if (qtyMatch) {
+    document.getElementById('quantity').value = qtyMatch[1];
+  }
+
+  // 2. Category matching
+  const categorySelect = document.getElementById('foodCategory');
+  let category = '';
+  const lowerText = text.toLowerCase();
+  
+  if (lowerText.includes('biryani') || lowerText.includes('dal') || lowerText.includes('rice') || lowerText.includes('paneer') || lowerText.includes('curry') || lowerText.includes('meal') || lowerText.includes('roti') || lowerText.includes('sabzi') || lowerText.includes('soup') || lowerText.includes('pasta') || lowerText.includes('pizza') || lowerText.includes('burger') || lowerText.includes('makhani')) {
+    category = 'Cooked Meals';
+  } else if (lowerText.includes('bread') || lowerText.includes('cake') || lowerText.includes('muffin') || lowerText.includes('croissant') || lowerText.includes('bun') || lowerText.includes('cookie') || lowerText.includes('pastry') || lowerText.includes('bakery')) {
+    category = 'Bakery Items';
+  } else if (lowerText.includes('apple') || lowerText.includes('banana') || lowerText.includes('orange') || lowerText.includes('fruit') || lowerText.includes('salad') || lowerText.includes('tomato') || lowerText.includes('potato') || lowerText.includes('vegetable') || lowerText.includes('mango') || lowerText.includes('veg')) {
+    category = 'Vegetables & Fruits';
+  } else if (lowerText.includes('milk') || lowerText.includes('cheese') || lowerText.includes('curd') || lowerText.includes('butter') || lowerText.includes('dairy') || lowerText.includes('yogurt')) {
+    category = 'Dairy Products';
+  } else if (lowerText.includes('chips') || lowerText.includes('biscuit') || lowerText.includes('packet') || lowerText.includes('snack') || lowerText.includes('canned') || lowerText.includes('packaged') || lowerText.includes('chocolate')) {
+    category = 'Packaged Food';
+  }
+  
+  if (category) {
+    categorySelect.value = category;
+  }
+
+  // 3. Storage Condition matching
+  const storageSelect = document.getElementById('storage');
+  let storage = 'Room Temperature'; // default
+  if (lowerText.includes('refrigerate') || lowerText.includes('fridge') || lowerText.includes('cold') || lowerText.includes('cool')) {
+    storage = 'Refrigerated';
+  } else if (lowerText.includes('freez') || lowerText.includes('froz') || lowerText.includes('ice')) {
+    storage = 'Frozen';
+  }
+  storageSelect.value = storage;
+
+  // 4. Prepared At time matching
+  // Look for formats: hh:mm am/pm or hh:mm or hh am/pm
+  const timeRegex = /(\d{1,2}):?(\d{2})?\s*(am|pm)?/i;
+  const timeMatch = text.match(timeRegex);
+  if (timeMatch && !text.match(/^\d+$/)) {
+    let hour = parseInt(timeMatch[1]);
+    const minute = timeMatch[2] ? timeMatch[2] : '00';
+    const ampm = timeMatch[3] ? timeMatch[3].toLowerCase() : '';
+    
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+    
+    const formattedHour = String(hour).padStart(2, '0');
+    document.getElementById('prepTime').value = `${formattedHour}:${minute}`;
+    
+    // Add default pickup until (4 hours later)
+    let pickupHour = (hour + 4) % 24;
+    document.getElementById('pickupUntil').value = `${String(pickupHour).padStart(2, '0')}:${minute}`;
+  }
+
+  // 5. Address matching (look for "at [location]" or "in [location]")
+  const locationMatch = text.match(/(?:at|in|near)\s+([A-Za-z0-9\s,]+?)(?:\s+prepared|\s+listed|\s+ready|\s+for|\s+quantity|\s+temp|\s+refrigerated|\s+frozen|$)/i);
+  if (locationMatch) {
+    document.getElementById('address').value = locationMatch[1].trim();
+    // Dispatch change event to update the map pin
+    document.getElementById('address').dispatchEvent(new Event('change'));
+  } else {
+    // Fallback: search for standard locations
+    const locations = ['Vijay Nagar', 'Palasia', 'Rajendra Nagar', 'Bhopal', 'Indore', 'Minal Residency', 'Arera Colony', 'MP Nagar'];
+    for (let loc of locations) {
+      if (lowerText.includes(loc.toLowerCase())) {
+        document.getElementById('address').value = loc;
+        document.getElementById('address').dispatchEvent(new Event('change'));
+        break;
+      }
+    }
+  }
+
+  // 6. Food Name extraction
+  let foodName = '';
+  const ofMatch = text.match(/portions\s+of\s+([A-Za-z0-9\s]+?)(?:\s+at|\s+in|\s+near|\s+prepared|\s+with|\s+ready|$)/i) || 
+                  text.match(/servings\s+of\s+([A-Za-z0-9\s]+?)(?:\s+at|\s+in|\s+near|\s+prepared|\s+with|\s+ready|$)/i);
+  if (ofMatch) {
+    foodName = ofMatch[1].trim();
+  } else {
+    const stopWords = ['warm', 'fresh', 'cooked', 'delicious', 'cold', 'leftover', 'some', 'portions', 'servings'];
+    let words = text.split(/\s+/);
+    let nameParts = [];
+    for (let word of words) {
+      let lWord = word.toLowerCase();
+      if (lWord.match(/^\d+$/) || ['portions', 'servings', 'at', 'in', 'near', 'prepared', 'ready'].includes(lWord)) {
+        break;
+      }
+      if (!stopWords.includes(lWord)) {
+        nameParts.push(word);
+      }
+    }
+    if (nameParts.length > 0) {
+      foodName = nameParts.join(' ');
+    }
+  }
+  if (foodName) {
+    foodName = foodName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    document.getElementById('foodName').value = foodName;
+  }
+
+  showToast('🪄 AI Magic Predict: Form populated successfully!');
 }

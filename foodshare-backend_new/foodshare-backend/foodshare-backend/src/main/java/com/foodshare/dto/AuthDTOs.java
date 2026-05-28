@@ -47,6 +47,8 @@ public class AuthDTOs {
 
         @NotBlank(message = "Security ID is required")
         private String securityId;
+
+        private String phoneNumber;
     }
 }
 
