@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class DonationService {
 
     private final DonationRepository donationRepository;
@@ -99,9 +100,35 @@ public class DonationService {
         donation.setStatus(Donation.DonationStatus.CLAIMED);
         donation.setClaimedBy(recipient);
         donation.setClaimedAt(LocalDateTime.now());
+        donation.setOtp(String.format("%04d", new java.util.Random().nextInt(10000)));
 
         Donation savedDonation = donationRepository.save(donation);
         notificationService.notifyUser(donation.getDonor(), "Your donation '" + donation.getFoodName() + "' was claimed by " + recipient.getFullName());
+
+        return toResponse(savedDonation);
+    }
+
+    @Transactional
+    public DonationDTOs.DonationResponse verifyOtp(Long donationId, String otp, String donorUsername) {
+        Donation donation = findDonation(donationId);
+
+        if (!donation.getDonor().getUsername().equals(donorUsername)) {
+            throw new AccessDeniedException("You are not the donor of this listing");
+        }
+        if (donation.getStatus() != Donation.DonationStatus.CLAIMED) {
+            throw new IllegalStateException("Donation must be in CLAIMED state to verify OTP");
+        }
+        if (donation.getOtp() == null || !donation.getOtp().equals(otp.trim())) {
+            throw new IllegalArgumentException("Invalid OTP code. Please try again.");
+        }
+
+        donation.setStatus(Donation.DonationStatus.COMPLETED);
+        Donation savedDonation = donationRepository.save(donation);
+        
+        if (donation.getClaimedBy() != null) {
+            notificationService.notifyUser(donation.getClaimedBy(), 
+                "Your pickup for '" + donation.getFoodName() + "' has been verified by the donor!");
+        }
 
         return toResponse(savedDonation);
     }
@@ -140,9 +167,9 @@ public class DonationService {
         return DonationDTOs.DonationResponse.builder()
                 .id(d.getId())
                 .foodName(d.getFoodName())
-                .category(d.getCategory().toDisplayName())
+                .category(d.getCategory() != null ? d.getCategory().toDisplayName() : null)
                 .quantity(d.getQuantity())
-                .storage(d.getStorage().name())
+                .storage(d.getStorage() != null ? d.getStorage().name() : null)
                 .address(d.getAddress())
                 .latitude(d.getLatitude())
                 .longitude(d.getLongitude())
@@ -155,12 +182,13 @@ public class DonationService {
                 .riskLabel(risk != null ? freshnessService.riskLabel(risk) : null)
                 .riskHours(risk != null ? freshnessService.safeWindow(risk) : null)
                 .riskRecommendation(risk != null ? freshnessService.recommendation(risk) : null)
-                .status(d.getStatus().name())
-                .donorUsername(d.getDonor().getUsername())
-                .donorFullName(d.getDonor().getFullName())
-                .donorPhoneNumber(d.getDonor().getPhoneNumber())
+                .status(d.getStatus() != null ? d.getStatus().name() : null)
+                .donorUsername(d.getDonor() != null ? d.getDonor().getUsername() : null)
+                .donorFullName(d.getDonor() != null ? d.getDonor().getFullName() : null)
+                .donorPhoneNumber(d.getDonor() != null ? d.getDonor().getPhoneNumber() : null)
                 .claimedByUsername(d.getClaimedBy() != null
                         ? d.getClaimedBy().getUsername() : null)
+                .otp(d.getOtp())
                 .createdAt(d.getCreatedAt())
                 .claimedAt(d.getClaimedAt())
                 .build();

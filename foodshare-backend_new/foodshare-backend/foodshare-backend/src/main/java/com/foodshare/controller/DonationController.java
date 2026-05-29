@@ -59,6 +59,17 @@ public class DonationController {
                 donationService.claimDonation(id, userDetails.getUsername()));
     }
 
+    @PostMapping("/{id}/verify-otp")
+    @PreAuthorize("hasRole('DONOR')")
+    public ResponseEntity<DonationDTOs.DonationResponse> verifyOtp(
+            @PathVariable Long id,
+            @Valid @RequestBody DonationDTOs.VerifyOtpRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        return ResponseEntity.ok(
+                donationService.verifyOtp(id, request.getOtp(), userDetails.getUsername()));
+    }
+
     @GetMapping("/claimed")
     @PreAuthorize("hasRole('RECIPIENT')")
     public ResponseEntity<List<DonationDTOs.DonationResponse>> myClaims(

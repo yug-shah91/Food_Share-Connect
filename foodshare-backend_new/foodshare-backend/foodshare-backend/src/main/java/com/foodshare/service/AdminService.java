@@ -23,7 +23,8 @@ public class AdminService {
     public AdminStatsDTO getDashboard() {
         long totalMeals     = donationRepository.sumAllQuantities();
         long totalListings  = donationRepository.count();
-        long completed      = donationRepository.countByStatus(Donation.DonationStatus.CLAIMED);
+        long completed      = donationRepository.countByStatus(Donation.DonationStatus.CLAIMED)
+                            + donationRepository.countByStatus(Donation.DonationStatus.COMPLETED);
         long active         = donationRepository.countByStatus(Donation.DonationStatus.ACTIVE);
         double co2Saved     = totalMeals * 0.26;
 

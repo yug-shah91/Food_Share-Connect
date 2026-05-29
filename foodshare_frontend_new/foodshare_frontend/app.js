@@ -1,7 +1,37 @@
+// Global error handler for debugging
+window.addEventListener('error', function(event) {
+  const errorMsg = `❌ JS Error: ${event.message} at ${event.filename.split('/').pop()}:${event.lineno}`;
+  console.error(errorMsg, event.error);
+  showToast(errorMsg);
+});
+
+window.addEventListener('unhandledrejection', function(event) {
+  const errorMsg = `❌ Promise Error: ${event.reason}`;
+  console.error(errorMsg, event.reason);
+  showToast(errorMsg);
+});
+
 // ============================================================
 //  CONFIG — update BASE_URL when deploying
 // ============================================================
 const BASE_URL = 'http://localhost:8080';
+ 
+// ============================================================
+//  UI UTILS — Toast Notifications
+// ============================================================
+function showToast(message) {
+  console.log("Toast:", message);
+  const toast = document.getElementById('toast');
+  if (!toast) {
+    alert(message);
+    return;
+  }
+  toast.textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, 3000);
+}
  
 // ============================================================
 //  API HELPERS
@@ -12,9 +42,25 @@ const BASE_URL = 'http://localhost:8080';
  */
 let _token = null;
  
-function getToken() { return _token; }
-function setToken(t) { _token = t; }
-function clearToken() { _token = null; }
+function getToken() { 
+  if (!_token) {
+    _token = localStorage.getItem('token');
+  }
+  return _token; 
+}
+function setToken(t) { 
+  _token = t; 
+  if (t) {
+    localStorage.setItem('token', t);
+  } else {
+    localStorage.removeItem('token');
+  }
+}
+function clearToken() { 
+  _token = null; 
+  localStorage.removeItem('token');
+  localStorage.removeItem('currentUser');
+}
  
 /**
  * Generic fetch wrapper — injects Authorization header when token exists.
@@ -55,6 +101,7 @@ const api = {
     apiFetch('/api/donations', { method: 'POST', body: JSON.stringify(data) }),
   getMyDonations: ()    => apiFetch('/api/donations/mine'),
   claimDonation:  (id)  => apiFetch('/api/donations/' + id + '/claim', { method: 'POST' }),
+  verifyOtp:      (id, otp) => apiFetch('/api/donations/' + id + '/verify-otp', { method: 'POST', body: JSON.stringify({ otp }) }),
   getMyClaims:    ()    => apiFetch('/api/donations/claimed'),
  
   // Admin
@@ -132,6 +179,7 @@ async function doLogin() {
       name:     data.fullName,
       role:     data.role.toLowerCase(), // "donor" | "recipient" | "admin"
     };
+    localStorage.setItem('currentUser', JSON.stringify(currentUser));
     bootApp();
   } catch (err) {
     errEl.style.display = 'block';
@@ -207,6 +255,7 @@ async function doRegister() {
       name:     data.fullName,
       role:     data.role.toLowerCase(),
     };
+    localStorage.setItem('currentUser', JSON.stringify(currentUser));
     bootApp();
   } catch (err) {
     errEl.style.display = 'block';
@@ -218,17 +267,24 @@ async function doRegister() {
 //  APP BOOT — build nav + show correct home after login
 // ============================================================
 function bootApp() {
-  document.getElementById('screen-login').classList.remove('active');
-  document.getElementById('screen-app').style.display = 'block';
- 
-  document.getElementById('nav-username').textContent = currentUser.name;
-  document.getElementById('nav-role-pill').innerHTML  =
-    `<span class="role-pill ${currentUser.role}">${currentUser.role}</span>`;
- 
-  buildNav();
-  goHome();
-  loadNotifications();
-  setTimeout(initMap, 300);
+  try {
+    document.getElementById('screen-login').classList.remove('active');
+    document.getElementById('screen-app').style.display = 'block';
+  
+    document.getElementById('nav-username').textContent = currentUser.name || currentUser.username;
+    document.getElementById('nav-role-pill').innerHTML  =
+      `<span class="role-pill ${currentUser.role}">${currentUser.role}</span>`;
+  
+    try { buildNav(); } catch (e) { console.error("Error building nav:", e); }
+    try { goHome(); } catch (e) { console.error("Error going home:", e); }
+    try { loadNotifications(); } catch (e) { console.error("Error loading notifications:", e); }
+    setTimeout(() => {
+      try { initMap(); } catch (e) { console.error("Error initializing map:", e); }
+    }, 300);
+  } catch (err) {
+    console.error("Critical error in bootApp:", err);
+    throw err;
+  }
 }
  
 function buildNav() {
@@ -306,12 +362,12 @@ function resetAiPanel() {
 //  DONOR — HOME
 // ============================================================
 async function renderDonorHome() {
-  document.getElementById('donor-name-hero').textContent = currentUser.name.split(' ')[0];
+  document.getElementById('donor-name-hero').textContent = (currentUser.name || currentUser.username || '').split(' ')[0];
  
   try {
     const donations = await api.getMyDonations();
     const active    = donations.filter(d => d.status === 'ACTIVE').length;
-    const completed = donations.filter(d => d.status === 'CLAIMED').length;
+    const completed = donations.filter(d => d.status === 'CLAIMED' || d.status === 'COMPLETED').length;
     const meals     = donations.reduce((s, d) => s + (d.quantity || 0), 0);
  
     document.getElementById('d-meals').textContent     = meals;
@@ -337,7 +393,7 @@ async function renderDonorHome() {
             <div class="mini-name">${d.foodName} · ${d.quantity} servings</div>
             <div class="mini-meta">${d.address} · Score: ${d.freshnessScore}</div>
           </div>
-          <span class="fbadge ${d.status === 'CLAIMED' ? 'grey' : meta.cls}">${d.status === 'CLAIMED' ? 'Claimed' : 'Active'}</span>
+          <span class="fbadge ${(d.status === 'CLAIMED' || d.status === 'COMPLETED') ? 'grey' : meta.cls}">${(d.status === 'CLAIMED' || d.status === 'COMPLETED') ? 'Claimed' : 'Active'}</span>
         </div>`;
     }).join('');
 
@@ -380,15 +436,20 @@ async function submitDonation() {
   let latitude = selectedLatitude;
   let longitude = selectedLongitude;
   if (!latitude || !longitude) {
+    showToast('Searching location coordinates...');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
     try {
-      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`);
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`, { signal: controller.signal });
+      clearTimeout(timeoutId);
       const geoData = await geoRes.json();
       if (geoData && geoData.length > 0) {
         latitude = parseFloat(geoData[0].lat);
         longitude = parseFloat(geoData[0].lon);
       }
     } catch (geoErr) {
-      console.warn("Geocoding failed, continuing without coordinates", geoErr);
+      clearTimeout(timeoutId);
+      console.warn("Geocoding failed or timed out, continuing without coordinates", geoErr);
     }
   }
 
@@ -466,13 +527,33 @@ async function renderDonorHistory() {
           const meta    = RISK_META[risk] || RISK_META.LOW;
           const cat     = ENUM_TO_CATEGORY[d.category] || d.category;
           const timeStr = d.createdAt ? new Date(d.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+          
+          let statusHTML = '';
+          if (d.status === 'COMPLETED') {
+            statusHTML = `<span class="fbadge low">Collected ✓</span>`;
+          } else if (d.status === 'CLAIMED') {
+            statusHTML = `
+              <div style="display:flex;flex-direction:column;gap:6px;align-items:center">
+                <span class="fbadge warning">Claimed</span>
+                <div style="display:flex;gap:4px;align-items:center">
+                  <input type="text" placeholder="OTP" id="otp-input-${d.id}" 
+                         style="width:55px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;text-align:center"
+                         maxlength="4"/>
+                  <button class="btn btn-primary" style="padding:2px 6px;font-size:11px;min-height:unset;line-height:1.2" 
+                          onclick="submitOtpVerification(${d.id})">Verify</button>
+                </div>
+              </div>`;
+          } else {
+            statusHTML = `<span class="fbadge info">Active</span>`;
+          }
+
           return `<tr>
             <td><strong>${EMOJI_MAP[d.category] || '🍱'} ${d.foodName}</strong></td>
             <td>${cat}</td>
             <td>${d.quantity} srv</td>
             <td>${d.address}</td>
             <td><span class="fbadge ${meta.cls}">${d.riskLabel || meta.label}</span></td>
-            <td><span class="fbadge ${d.status === 'CLAIMED' ? 'low' : 'info'}">${d.status === 'CLAIMED' ? '✓ Claimed' : 'Active'}</span></td>
+            <td>${statusHTML}</td>
             <td style="color:var(--muted)">${timeStr}</td>
           </tr>`;
         }).join('')}
@@ -482,12 +563,31 @@ async function renderDonorHistory() {
     el.innerHTML = `<div class="empty-state"><p>⚠️ Could not load history: ${err.message}</p></div>`;
   }
 }
+
+async function submitOtpVerification(donationId) {
+  const input = document.getElementById('otp-input-' + donationId);
+  if (!input) return;
+  const otp = input.value.trim();
+  if (!otp) {
+    showToast('⚠️ Please enter the 4-digit OTP code');
+    return;
+  }
+
+  try {
+    await api.verifyOtp(donationId, otp);
+    showToast('✅ OTP verified successfully! Food pickup is complete.');
+    renderDonorHome();
+    renderDonorHistory();
+  } catch (err) {
+    showToast('❌ OTP Verification failed: ' + err.message);
+  }
+}
  
 // ============================================================
 //  RECIPIENT — HOME
 // ============================================================
 async function renderRecipientHome() {
-  document.getElementById('recipient-name-hero').textContent = currentUser.name.split(' ')[0];
+  document.getElementById('recipient-name-hero').textContent = (currentUser.name || currentUser.username || '').split(' ')[0];
  
   try {
     const [activeDonations, myClaims] = await Promise.all([
@@ -655,15 +755,10 @@ async function confirmClaim(donationId) {
  
     document.getElementById('claim-modal').style.display = 'none';
     const d = _activeListings.find(x => x.id === donationId);
-    showToast('✅ "' + (d ? d.foodName : 'Item') + '" claimed! Pickup confirmed.');
+    showToast('✅ "' + (d ? d.foodName : 'Item') + '" claimed! Redirecting to My Pickups...');
  
-    // Refresh the currently active page to update UI state
-    const activePage = document.querySelector('.page.active');
-    if (activePage && activePage.id === 'page-recipient-home') {
-      renderRecipientHome();
-    } else {
-      renderFindFood();
-    }
+    // Redirect to My Pickups immediately
+    showPage('recipient-claimed');
   } catch (err) {
     document.getElementById('claim-modal').style.display = 'none';
     showToast('❌ Claim failed: ' + err.message);
@@ -692,17 +787,21 @@ async function renderClaimedPickups() {
  
     el.innerHTML = `
       <table class="list-table">
-        <thead><tr><th>Food</th><th>Donor</th><th>Qty</th><th>Location</th><th>Freshness</th><th>Claimed At</th></tr></thead>
+        <thead><tr><th>Food</th><th>Donor</th><th>Qty</th><th>Location</th><th>Freshness</th><th>Pickup OTP</th><th>Claimed At</th></tr></thead>
         <tbody>${myClaims.map(d => {
           const risk    = (d.riskLevel || 'LOW').toUpperCase();
           const meta    = RISK_META[risk] || RISK_META.LOW;
           const timeStr = d.claimedAt ? new Date(d.claimedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+          const otpHTML = d.status === 'COMPLETED' 
+            ? `<span class="fbadge low">Verified ✓</span>` 
+            : `<span class="fbadge info" style="font-family:monospace;font-size:14px;letter-spacing:1px;font-weight:bold">${d.otp || '—'}</span>`;
           return `<tr>
             <td><strong>${EMOJI_MAP[d.category] || '🍱'} ${d.foodName}</strong></td>
             <td>${d.donorFullName} <br> <small>${d.donorPhoneNumber || ''}</small></td>
             <td>${d.quantity} srv</td>
             <td>${d.address}</td>
             <td><span class="fbadge ${meta.cls}">${d.riskLabel || meta.label}</span></td>
+            <td>${otpHTML}</td>
             <td style="color:var(--muted)">${timeStr}</td>
           </tr>`;
         }).join('')}
@@ -741,7 +840,7 @@ async function renderAdminDashboard() {
               <td>${d.donorFullName}</td>
               <td>${d.quantity}</td>
               <td><span class="fbadge ${meta.cls}">${d.freshnessScore}</span></td>
-              <td><span class="fbadge ${d.status === 'CLAIMED' ? 'low' : 'info'}">${d.status === 'CLAIMED' ? 'Claimed' : 'Active'}</span></td>
+              <td><span class="fbadge ${(d.status === 'CLAIMED' || d.status === 'COMPLETED') ? 'low' : 'info'}">${(d.status === 'CLAIMED' || d.status === 'COMPLETED') ? 'Claimed' : 'Active'}</span></td>
               <td><button class="btn btn-ghost" style="padding:4px 8px;font-size:12px;color:var(--danger)" onclick="deleteDonationAdmin(${d.id})">Delete</button></td>
             </tr>`;
           }).join('')}
@@ -774,7 +873,7 @@ async function renderAdminDashboard() {
             <span class="pred-dot" style="background:${dotColor}"></span>
             <div>
               <div class="pred-name">${d.foodName} — by ${d.donorFullName}</div>
-              <div class="pred-meta">Score: ${d.freshnessScore} · ${d.riskLabel || meta.label} · Safe: ${d.riskHours || meta.hours} · Status: ${d.status === 'CLAIMED' ? 'Claimed' : 'Active'}</div>
+              <div class="pred-meta">Score: ${d.freshnessScore} · ${d.riskLabel || meta.label} · Safe: ${d.riskHours || meta.hours} · Status: ${(d.status === 'CLAIMED' || d.status === 'COMPLETED') ? 'Claimed' : 'Active'}</div>
             </div>
           </div>`;
       }).join('');
@@ -985,7 +1084,7 @@ function updateDonorMapMarkers(donations) {
       marker.bindPopup(`
         <strong>${EMOJI_MAP[d.category] || '🍱'} ${d.foodName}</strong><br>
         Qty: ${d.quantity} servings<br>
-        Status: <span style="font-weight:bold;color:${d.status === 'CLAIMED' ? 'var(--muted)' : 'var(--primary)'}">${d.status === 'CLAIMED' ? 'Claimed' : 'Active'}</span><br>
+        Status: <span style="font-weight:bold;color:${(d.status === 'CLAIMED' || d.status === 'COMPLETED') ? 'var(--muted)' : 'var(--primary)'}">${(d.status === 'CLAIMED' || d.status === 'COMPLETED') ? 'Claimed' : 'Active'}</span><br>
         Score: ${d.freshnessScore}/100 (${d.riskLabel || meta.label})
       `);
       donorMapMarkers.push(marker);
@@ -1126,3 +1225,19 @@ function magicAutofill() {
 
   showToast('🪄 AI Magic Predict: Form populated successfully!');
 }
+
+// Check for persisted login session on startup
+(function checkPersistedSession() {
+  const savedToken = localStorage.getItem('token');
+  const savedUser = localStorage.getItem('currentUser');
+  if (savedToken && savedUser) {
+    try {
+      _token = savedToken;
+      currentUser = JSON.parse(savedUser);
+      bootApp();
+    } catch (e) {
+      console.error('Failed to parse saved session:', e);
+      clearToken();
+    }
+  }
+})();

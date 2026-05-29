@@ -59,7 +59,14 @@ public class DonationDTOs {
         private String donorFullName;
         private String donorPhoneNumber;
         private String claimedByUsername;
+        private String otp;
         private LocalDateTime createdAt;
         private LocalDateTime claimedAt;
+    }
+
+    @Getter @Setter
+    public static class VerifyOtpRequest {
+        @NotBlank(message = "OTP code is required")
+        private String otp;
     }
 }

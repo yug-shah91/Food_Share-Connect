@@ -57,6 +57,8 @@ public class Donation {
     @JoinColumn(name = "claimed_by_id")
     private User claimedBy;
 
+    private String otp;
+
     // ── Timestamps ─────────────────────────────────────────
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -93,6 +95,6 @@ public class Donation {
     }
 
     public enum DonationStatus {
-        ACTIVE, CLAIMED
+        ACTIVE, CLAIMED, COMPLETED
     }
 }

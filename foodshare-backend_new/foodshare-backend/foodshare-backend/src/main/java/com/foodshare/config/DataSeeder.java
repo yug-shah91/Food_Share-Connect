@@ -15,35 +15,35 @@ public class DataSeeder implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    private void seedUser(String username, String fullName, String password, String phoneNumber, User.Role role) {
+        if (!userRepository.existsByUsername(username)) {
+            userRepository.save(User.builder()
+                    .username(username)
+                    .fullName(fullName)
+                    .password(passwordEncoder.encode(password))
+                    .phoneNumber(phoneNumber)
+                    .role(role)
+                    .build());
+            log.info("✅ Seeded demo user: {} ({})", username, role);
+        }
+    }
 
     @Override
     public void run(String... args) {
-        if (userRepository.count() == 0) {
-            userRepository.save(User.builder()
-                    .username("yash")
-                    .fullName("Yash Veer Singh")
-                    .password(passwordEncoder.encode("yash123"))
-                    .phoneNumber("+91 9876543210")
-                    .role(User.Role.DONOR)
-                    .build());
-
-            userRepository.save(User.builder()
-                    .username("yug")
-                    .fullName("Yug Shah")
-                    .password(passwordEncoder.encode("yug123"))
-                    .phoneNumber("+91 8765432109")
-                    .role(User.Role.RECIPIENT)
-                    .build());
-
-            userRepository.save(User.builder()
-                    .username("yatharth")
-                    .fullName("Yatharth Gupta")
-                    .password(passwordEncoder.encode("yatharth123"))
-                    .phoneNumber("+91 7654321098")
-                    .role(User.Role.ADMIN)
-                    .build());
-
-            log.info("✅  Demo users seeded: yash (donor), yug (recipient), yatharth (admin)");
+        // Clean up legacy status values in database
+        try {
+            int updated = jdbcTemplate.update("UPDATE donations SET status = 'CLAIMED' WHERE status = 'COMPLETED'");
+            if (updated > 0) {
+                log.info("✅ Migrated {} legacy 'COMPLETED' donations to 'CLAIMED'", updated);
+            }
+        } catch (Exception e) {
+            log.error("Failed to migrate legacy 'COMPLETED' donations: {}", e.getMessage());
         }
+
+        seedUser("yash", "Yash Veer Singh", "yash123", "+91 9876543210", User.Role.DONOR);
+        seedUser("yug", "Yug Shah", "yug123", "+91 8765432109", User.Role.RECIPIENT);
+        seedUser("yatharth", "Yatharth Gupta", "yatharth123", "+91 7654321098", User.Role.ADMIN);
     }
 }
